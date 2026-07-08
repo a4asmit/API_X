@@ -19,12 +19,12 @@ Commands:
 Usage:
     python telegram_bot.py
 """
-
+import csv
 import json
 import os
 import random
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timedelta
 from dotenv import load_dotenv
 import urllib.request
 
@@ -49,8 +49,67 @@ class LegendXBot:
     
     def __init__(self):
         self.data_dir = Path("data")
-        self.news_dir = self.data_dir / "news"  
-    
+        self.news_dir = self.data_dir / "news"
+
+    def create_dataset_if_not_exists(self):
+      csv_path = Path("market_dataset.csv")
+  
+      if csv_path.exists():
+          return
+  
+      with open(csv_path, "w", newline="", encoding="utf-8") as csvfile:
+          writer = csv.writer(csvfile)
+  
+          writer.writerow([
+              "timestamp",
+              "symbol",
+              "current_price",
+  
+              "trend_total_score",
+              "structure_score",
+              "adx_score",
+              "funding_score",
+              "rsi_score",
+              "volume_score",
+              "wick_score",
+  
+              "cvd_skew",
+              "price_action_12h",
+  
+              "future_price",
+              "future_change_pct"
+          ])
+  
+      print("[INFO] market_dataset.csv created successfully.")
+
+    def log_market_snapshot(self):
+      csv_path = Path("market_dataset.csv")
+  
+      with open(csv_path, "a", newline="", encoding="utf-8") as csvfile:
+          writer = csv.writer(csvfile)
+  
+          writer.writerow([
+              datetime.now().strftime("%Y-%m-%d %H:%M:%S"),  # timestamp
+              "BTC",                                         # symbol
+              0,                                             # current_price
+  
+              0,                                             # trend_total_score
+              0,                                             # structure_score
+              0,                                             # adx_score
+              0,                                             # funding_score
+              0,                                             # rsi_score
+              0,                                             # volume_score
+              0,                                             # wick_score
+  
+              0,                                             # cvd_skew
+              0,                                             # price_action_12h
+  
+              "",                                            # future_price
+              ""                                             # future_change_pct
+          ])
+  
+      print("[LOGGER] Snapshot written successfully.")
+  
     def _fetch_api(self, url):
         """Helper to fetch API data with browser-like headers"""
         headers = {
@@ -96,6 +155,7 @@ class LegendXBot:
 /liquidation &lt;symbol&gt; - Leverage trap detector
 /map &lt;symbol&gt; - Visual liquidity heatmap
 /flow &lt;symbol&gt; - Order flow &amp; CVD trap detector
+/download_csv - Download ML Dataset
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -985,6 +1045,23 @@ async def flow_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message = bot.cmd_flow(symbol=symbol)
     await update.message.reply_text(message, parse_mode='HTML')
 
+async def download_csv_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    csv_path = Path("market_dataset.csv")
+
+    if not csv_path.exists():
+        await update.message.reply_text(
+            "❌ Dataset file not found.\n"
+            "The dataset hasn't been generated yet."
+        )
+        return
+
+    with open(csv_path, "rb") as csv_file:
+        await update.message.reply_document(
+            document=InputFile(csv_file),
+            filename="market_dataset.csv",
+            caption="📊 Legend_X Market Dataset"
+        )
+
 
 
 # ════════════════════════════════════════════════════════════════════════════════════════════════
@@ -1005,7 +1082,11 @@ def main():
         print("TELEGRAM_BOT_TOKEN=your_token_here")
         print("TELEGRAM_CHAT_ID=your_chat_id_here")
         return
-    
+    # Initialize bot and create dataset file if needed
+    bot = LegendXBot()
+    bot.create_dataset_if_not_exists()
+    # TEMPORARY: Write one snapshot for testing
+    bot.log_market_snapshot()
     # Create application
     application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
     
@@ -1022,6 +1103,7 @@ def main():
     application.add_handler(CommandHandler("liquidation", liquidation_command))
     application.add_handler(CommandHandler("map", map_command))
     application.add_handler(CommandHandler("flow", flow_command))
+    application.add_handler(CommandHandler("download_csv", download_csv_command))
     
     # Start polling
     print("\n" + "="*100)
