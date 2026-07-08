@@ -333,6 +333,9 @@ be cautious when everyone is greedy.</i>
     # 6-FACTOR TREND DETECTOR
     # ══════════════════════════════════════════════════════════════════════════════════
 
+    def get_trend_data(self, symbol):
+      pass
+  
     def cmd_trend(self, symbol):
         """Handle /trend command - 6 Factor Binance or 3 Factor CoinGecko"""
         base_symbol = symbol.upper().replace("/", "").replace("USDT", "")
