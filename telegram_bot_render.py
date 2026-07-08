@@ -4,11 +4,11 @@ telegram_bot_render.py
 LEGEND_X Telegram Bot - Production Ready for Render Deployment
 
 Key Features:
-- Webhook mode (required for Render free tier)
+- Polling mode (stable, reliable for Render)
 - Proper error handling and logging
 - CSV dataset logging every 4 hours
 - All 11 market intelligence commands
-- No blocking operations
+- Non-blocking operations
 - Clean startup/shutdown
 
 Deployment on Render:
@@ -18,12 +18,9 @@ Deployment on Render:
 4. Start command: python telegram_bot_render.py
 5. Set environment variables:
    - TELEGRAM_BOT_TOKEN=your_token
-   - WEBHOOK_URL=https://your-app-name.onrender.com
-6. Service will auto-restart every 24h (free tier limitation)
 
 Environment Variables (.env):
     TELEGRAM_BOT_TOKEN=1234567890:ABCDefgh...
-    WEBHOOK_URL=https://your-app-name.onrender.com
 """
 
 import csv
@@ -59,17 +56,10 @@ logger = logging.getLogger(__name__)
 # ════════════════════════════════════════════════════════════════════════════════════════════════
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-WEBHOOK_URL = os.getenv("WEBHOOK_URL")
-PORT = int(os.environ.get('PORT', 5000))
 
 # Validate required env vars
 if not TELEGRAM_BOT_TOKEN:
     logger.error("TELEGRAM_BOT_TOKEN not set in environment variables")
-    sys.exit(1)
-
-if not WEBHOOK_URL:
-    logger.error("WEBHOOK_URL not set in environment variables")
-    logger.info("Example: https://your-app-name.onrender.com")
     sys.exit(1)
 
 # Import Telegram library
@@ -80,7 +70,7 @@ try:
     logger.info("✓ python-telegram-bot library loaded")
 except ImportError:
     logger.error("python-telegram-bot not installed!")
-    logger.error("Run: pip install python-telegram-bot")
+    logger.error("Run: pip install 'python-telegram-bot[job-queue]'")
     TELEGRAM_AVAILABLE = False
     sys.exit(1)
 
@@ -137,7 +127,7 @@ class LegendXBot:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 <b>Status:</b> [✓ OPERATIONAL]
-<b>Mode:</b> Webhook (Render)
+<b>Mode:</b> Polling (Stable)
 <b>Dataset:</b> Logging every 4 hours
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -1016,14 +1006,12 @@ async def log_market_data_job(context: ContextTypes.DEFAULT_TYPE):
 # ════════════════════════════════════════════════════════════════════════════════════════════════
 
 def main():
-    """Start the bot in webhook mode for Render"""
+    """Start the bot using polling mode"""
     
     logger.info("\n" + "="*100)
     logger.info("LEGEND_X TELEGRAM BOT - RENDER DEPLOYMENT")
     logger.info("="*100)
     logger.info(f"Bot Token: {TELEGRAM_BOT_TOKEN[:20]}...")
-    logger.info(f"Webhook URL: {WEBHOOK_URL}")
-    logger.info(f"Port: {PORT}")
     logger.info("="*100 + "\n")
     
     # Create application
@@ -1043,21 +1031,22 @@ def main():
     application.add_handler(CommandHandler("flow", flow_command))
     
     # Add background job (every 4 hours)
-    job_queue = application.job_queue
-    job_queue.run_repeating(log_market_data_job, interval=14400, first=300)
-    logger.info("✓ Market logging job scheduled (every 4 hours)")
-    
-    # Start webhook
-    logger.info("Starting webhook mode...")
     try:
-        application.run_webhook(
-            listen="0.0.0.0",
-            port=PORT,
-            url_path=TELEGRAM_BOT_TOKEN,
-            webhook_url=f"{WEBHOOK_URL}/{TELEGRAM_BOT_TOKEN}"
-        )
+        job_queue = application.job_queue
+        if job_queue:
+            job_queue.run_repeating(log_market_data_job, interval=14400, first=300)
+            logger.info("✓ Market logging job scheduled (every 4 hours)")
+        else:
+            logger.warning("⚠️ Job queue not available")
     except Exception as e:
-        logger.error(f"Failed to start webhook: {e}")
+        logger.warning(f"⚠️ Could not set up job queue: {e}")
+    
+    # Start polling (stable mode)
+    logger.info("Starting polling mode...")
+    try:
+        application.run_polling(allowed_updates=Update.ALL_TYPES)
+    except Exception as e:
+        logger.error(f"Failed to start bot: {e}")
         sys.exit(1)
 
 if __name__ == "__main__":
