@@ -85,13 +85,22 @@ class LegendXBot:
     def log_market_snapshot(self):
       csv_path = Path("market_dataset.csv")
   
+      symbol = "BTC"
+      pair = symbol + "USDT"
+
+      price_data = self._fetch_api(
+            f"https://fapi.binance.com/fapi/v1/ticker/price?symbol={pair}"
+        )
+
+      current_price = float(price_data["price"])  
+
       with open(csv_path, "a", newline="", encoding="utf-8") as csvfile:
           writer = csv.writer(csvfile)
   
           writer.writerow([
               datetime.now().strftime("%Y-%m-%d %H:%M:%S"),  # timestamp
-              "BTC",                                         # symbol
-              0,                                             # current_price
+              symbol,                                         # symbol
+              current_price,                                             # current_price
   
               0,                                             # trend_total_score
               0,                                             # structure_score
