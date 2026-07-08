@@ -1084,9 +1084,8 @@ def main():
         return
     # Initialize bot and create dataset file if needed
     bot = LegendXBot()
-    bot.create_dataset_if_not_exists()
-    # TEMPORARY: Write one snapshot for testing
-    bot.log_market_snapshot()
+    bot.create_dataset_if_not_exists
+  
     # Create application
     application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
     
