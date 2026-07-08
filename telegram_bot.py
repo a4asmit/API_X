@@ -1060,6 +1060,9 @@ async def flow_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def download_csv_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     csv_path = Path("market_dataset.csv")
 
+    print(f"[DOWNLOAD] Looking for: {csv_path.resolve()}")
+    print(f"[DOWNLOAD] Exists: {csv_path.exists()}")
+
     if not csv_path.exists():
         await update.message.reply_text(
             "❌ Dataset file not found.\n"
@@ -1096,7 +1099,7 @@ def main():
         return
     # Initialize bot and create dataset file if needed
     bot = LegendXBot()
-    bot.create_dataset_if_not_exists
+    bot.create_dataset_if_not_exists()
   
     # Create application
     application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
