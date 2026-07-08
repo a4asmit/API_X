@@ -36,7 +36,7 @@ TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
 # Import telegram library
 try:
-    from telegram import Update
+    from telegram import Update, InputFile
     from telegram.ext import Application, CommandHandler, ContextTypes
     TELEGRAM_AVAILABLE = True
 except ImportError:
@@ -984,6 +984,8 @@ async def flow_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     bot = LegendXBot()
     message = bot.cmd_flow(symbol=symbol)
     await update.message.reply_text(message, parse_mode='HTML')
+
+
 
 # ════════════════════════════════════════════════════════════════════════════════════════════════
 # MAIN ENTRY POINT (Standard Polling for Local PC)
