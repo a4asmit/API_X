@@ -27,6 +27,7 @@ from pathlib import Path
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 import urllib.request
+from telegram.ext import Application, CommandHandler, ContextTypes, CallbackContext
 
 # Load environment variables
 load_dotenv()
@@ -83,41 +84,80 @@ class LegendXBot:
       print("[INFO] market_dataset.csv created successfully.")
 
     def log_market_snapshot(self):
-      csv_path = Path("market_dataset.csv")
-  
-      symbol = "BTC"
-      pair = symbol + "USDT"
+        """Fetches current math data and writes a new row to the CSV."""
+        csv_path = Path("market_dataset.csv")
+        symbol = "BTC"
+        
+        trend_data = self.get_trend_scores(symbol)
+        flow_data = self.get_flow_scores(symbol)
+        
+        if not trend_data or not flow_data:
+            print("[LOGGER] Failed to fetch API data. Skipping snapshot.")
+            return
 
-      price_data = self._fetch_api(
-            f"https://fapi.binance.com/fapi/v1/ticker/price?symbol={pair}"
-        )
+        with open(csv_path, "a", newline="", encoding="utf-8") as csvfile:
+            writer = csv.writer(csvfile)
+            writer.writerow([
+                datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                symbol,
+                trend_data["current_price"],
+                trend_data["trend_total_score"],
+                trend_data["structure_score"],
+                trend_data["adx_score"],
+                trend_data["funding_score"],
+                trend_data["rsi_score"],
+                trend_data["volume_score"],
+                trend_data["wick_score"],
+                flow_data["cvd_skew"],
+                flow_data["price_action_12h"],
+                "",  # future_price
+                ""   # future_change_pct
+            ])
+        print(f"[LOGGER] Snapshot written successfully at {datetime.now().strftime('%H:%M:%S')}")
 
-      current_price = float(price_data["price"])  
+    def update_future_prices(self):
+        """Looks for rows exactly 4 hours old and fills in the future price."""
+        csv_path = Path("market_dataset.csv")
+        if not csv_path.exists(): return
 
-      with open(csv_path, "a", newline="", encoding="utf-8") as csvfile:
-          writer = csv.writer(csvfile)
-  
-          writer.writerow([
-              datetime.now().strftime("%Y-%m-%d %H:%M:%S"),  # timestamp
-              symbol,                                         # symbol
-              current_price,                                             # current_price
-  
-              0,                                             # trend_total_score
-              0,                                             # structure_score
-              0,                                             # adx_score
-              0,                                             # funding_score
-              0,                                             # rsi_score
-              0,                                             # volume_score
-              0,                                             # wick_score
-  
-              0,                                             # cvd_skew
-              0,                                             # price_action_12h
-  
-              "",                                            # future_price
-              ""                                             # future_change_pct
-          ])
-  
-      print("[LOGGER] Snapshot written successfully.")
+        rows = []
+        updated_count = 0
+        now = datetime.now()
+        four_hours_ago = now - timedelta(hours=4)
+
+        with open(csv_path, "r", newline="", encoding="utf-8") as csvfile:
+            reader = csv.reader(csvfile)
+            header = next(reader)
+            rows.append(header)
+            
+            for row in reader:
+                # Check if future_price is empty
+                if len(row) >= 14 and row[12] == "":
+                    try:
+                        row_time = datetime.strptime(row[0], "%Y-%m-%d %H:%M:%S")
+                        # If the row is older than 4 hours, it's time to fill it in
+                        if row_time <= four_hours_ago:
+                            symbol = row[1] + "USDT"
+                            price_data = self._fetch_api(f"https://fapi.binance.com/fapi/v1/ticker/price?symbol={symbol}")
+                            future_price = float(price_data["price"])
+                            past_price = float(row[2])
+                            
+                            future_change_pct = ((future_price - past_price) / past_price) * 100
+                            
+                            row[12] = future_price
+                            row[13] = f"{future_change_pct:.4f}"
+                            updated_count += 1
+                    except Exception as e:
+                        print(f"[UPDATE] Error updating row: {e}")
+                rows.append(row)
+
+        # Rewrite the CSV with the updated rows
+        with open(csv_path, "w", newline="", encoding="utf-8") as csvfile:
+            writer = csv.writer(csvfile)
+            writer.writerows(rows)
+            
+        if updated_count > 0:
+            print(f"[UPDATE] Retroactively updated {updated_count} rows with future prices.")
   
     def _fetch_api(self, url):
         """Helper to fetch API data with browser-like headers"""
@@ -342,8 +382,82 @@ be cautious when everyone is greedy.</i>
     # 6-FACTOR TREND DETECTOR
     # ══════════════════════════════════════════════════════════════════════════════════
 
-    def get_trend_data(self, symbol):
-      pass
+    def get_trend_scores(self, symbol):
+        """Extracts the 6-Factor math into a pure dictionary for logging."""
+        base_symbol = symbol.upper().replace("/", "").replace("USDT", "")
+        binance_symbol = base_symbol + "USDT"
+        
+        try:
+            klines = self._fetch_api(f"https://fapi.binance.com/fapi/v1/klines?symbol={binance_symbol}&interval=4h&limit=100")
+            if not klines or len(klines) < 50: return None
+
+            # Funding
+            funding_val = 0.0
+            try:
+                fund_data = self._fetch_api(f"https://fapi.binance.com/fapi/v1/premiumIndex?symbol={binance_symbol}")
+                funding_val = float(fund_data.get('lastFundingRate', 0))
+                if funding_val > 0.05: funding_score = -2
+                elif funding_val < -0.05: funding_score = 2
+                else: funding_score = 0
+            except: funding_score = 0
+
+            try: structure_score = self._calc_structure(klines) or 0
+            except: structure_score = 0
+            try: adx_score, adx_val = self._calc_adx(klines) or (0, 0)
+            except: adx_score = 0
+            try: rsi_score, rsi_val = self._calc_rsi(klines) or (0, 0)
+            except: rsi_score = 0
+            try: volume_score = self._calc_volume(klines) or 0
+            except: volume_score = 0
+            try: wick_score = self._calc_wick(klines[-1]) or 0
+            except: wick_score = 0
+
+            total_score = (structure_score * 2) + (adx_score * 2) + (funding_score * 2) + volume_score + rsi_score + wick_score
+            current_price = float(klines[-1][4])
+
+            return {
+                "current_price": current_price,
+                "trend_total_score": total_score,
+                "structure_score": structure_score,
+                "adx_score": adx_score,
+                "funding_score": funding_score,
+                "rsi_score": rsi_score,
+                "volume_score": volume_score,
+                "wick_score": wick_score
+            }
+        except:
+            return None
+
+    def get_flow_scores(self, symbol):
+        """Extracts CVD and 12h price action for logging."""
+        base_symbol = symbol.upper().replace("/", "").replace("USDT", "")
+        pair = base_symbol + "USDT"
+        
+        try:
+            klines = self._fetch_api(f"https://fapi.binance.com/fapi/v1/klines?symbol={pair}&interval=1m&limit=720")
+            if not klines or len(klines) < 60: return None
+
+            open_price = float(klines[0][1])   
+            close_price = float(klines[-1][4]) 
+            price_action_12h = ((close_price - open_price) / open_price) * 100
+            
+            taker_buy_vol = 0.0
+            total_vol = 0.0
+            
+            for k in klines:
+                total_vol += float(k[7])
+                taker_buy_vol += float(k[10])
+                
+            taker_sell_vol = total_vol - taker_buy_vol
+            cvd_delta = taker_buy_vol - taker_sell_vol
+            cvd_skew = (cvd_delta / total_vol * 100) if total_vol > 0 else 0
+
+            return {
+                "cvd_skew": cvd_skew,
+                "price_action_12h": price_action_12h
+            }
+        except:
+            return None
   
     def cmd_trend(self, symbol):
         """Handle /trend command - 6 Factor Binance or 3 Factor CoinGecko"""
@@ -1083,34 +1197,37 @@ async def download_csv_command(update: Update, context: ContextTypes.DEFAULT_TYP
 # MAIN ENTRY POINT (Standard Polling for Local PC)
 # ════════════════════════════════════════════════════════════════════════════════════════════════
 
+# Async wrappers for the background jobs
+async def log_job(context: CallbackContext):
+    bot = LegendXBot()
+    bot.log_market_snapshot()
+
+async def update_job(context: CallbackContext):
+    bot = LegendXBot()
+    bot.update_future_prices()
+
 def main():
     """Start the Telegram bot"""
     
     if not TELEGRAM_AVAILABLE:
         print("[ERROR] python-telegram-bot not installed!")
-        print("Install with: pip install python-telegram-bot")
         return
     
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
         print("[ERROR] Missing TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID in .env")
-        print("\nAdd these to your .env file:")
-        print("TELEGRAM_BOT_TOKEN=your_token_here")
-        print("TELEGRAM_CHAT_ID=your_chat_id_here")
         return
-    # Initialize bot and create dataset file if needed
+        
     bot = LegendXBot()
     bot.create_dataset_if_not_exists()
   
-    # Create application
     application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
     
-    # Add command handlers
+    # Add command handlers (Keep all your existing ones here)
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler("news", news_command))
     application.add_handler(CommandHandler("feargreed", feargreed_command))
     application.add_handler(CommandHandler("gainers", gainers_command))
     application.add_handler(CommandHandler("losers", losers_command))
-    application.add_handler(CommandHandler("loosers", losers_command)) # Typo alias
     application.add_handler(CommandHandler("volume", volume_command))
     application.add_handler(CommandHandler("fgainers", fgainers_command))
     application.add_handler(CommandHandler("trend", trend_command))
@@ -1119,32 +1236,20 @@ def main():
     application.add_handler(CommandHandler("flow", flow_command))
     application.add_handler(CommandHandler("download_csv", download_csv_command))
     
-    # Start polling
-    print("\n" + "="*100)
-    print("LEGEND_X TELEGRAM BOT - LIVE MODE")
-    print("="*100)
-    print("\n✅ Bot started! Listening for commands...\n")
-    print("Available commands:")
-    print("  /start - Show menu")
-    print("  /news <count> - Read latest news (shuffled)")
-    print("  /feargreed - Current market Fear & Greed Index")
-    print("  /gainers - Top 10 gaining coins (24H)")
-    print("  /losers - Top 10 losing coins (24H)")
-    print("  /fgainers - Top 10 filtered gainers")
-    print("  /volume - Top 10 coins by trading volume (24H)")
-    print("  /trend <symbol> - 6-Factor TA Trend Detector")
-    print("  /liquidation <symbol> - Leverage trap detector")
-    print("  /map <symbol> - Visual liquidity heatmap")
-    print("  /flow <symbol> - Order flow & CVD trap detector")
-    print("\n" + "="*100 + "\n")
+    # --- SCHEDULE BACKGROUND JOBS ---
+    # 1. Log a new snapshot every 4 hours (14400 seconds)
+    application.job_queue.run_repeating(log_job, interval=14400, first=1)
     
-    # run_polling() is synchronous and manages its own event loop
-    application.run_polling(allowed_updates=Update.ALL_TYPES)
-
+    # 2. Check for rows to update every 15 minutes (900 seconds)
+    application.job_queue.run_repeating(update_job, interval=900, first=10)
+    
+    print("\n" + "="*100)
+    print("LEGEND_X TELEGRAM BOT - LIVE MODE + ML LOGGER")
+    print("="*100)
+    print("\n✅ Bot started! Listening for commands...")
+    print("⏳ ML Logger is running: Logging every 4H & Updating futures every 15M.")
+    
+    application.run_polling()
 
 if __name__ == "__main__":
-    if not TELEGRAM_AVAILABLE:
-        print("\n[ERROR] python-telegram-bot library not found!")
-        print("Install: pip install python-telegram-bot\n")
-    else:
-        main()
+    main()
