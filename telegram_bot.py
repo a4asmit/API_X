@@ -1179,7 +1179,7 @@ async def download_csv_command(update: Update, context: ContextTypes.DEFAULT_TYP
 
     if not csv_path.exists():
         await update.message.reply_text(
-            "❌ Dataset file not found.\n"
+            "Dataset file not found.\n"
             "The dataset hasn't been generated yet."
         )
         return
@@ -1188,7 +1188,7 @@ async def download_csv_command(update: Update, context: ContextTypes.DEFAULT_TYP
         await update.message.reply_document(
             document=InputFile(csv_file),
             filename="market_dataset.csv",
-            caption="📊 Legend_X Market Dataset"
+            caption="Legend_X Market Dataset"
         )
 
 
@@ -1246,8 +1246,8 @@ def main():
     print("\n" + "="*100)
     print("LEGEND_X TELEGRAM BOT - LIVE MODE + ML LOGGER")
     print("="*100)
-    print("\n✅ Bot started! Listening for commands...")
-    print("⏳ ML Logger is running: Logging every 4H & Updating futures every 15M.")
+    print("\nBot started! Listening for commands...")
+    print("ML Logger is running: Logging every 4H & Updating futures every 15M.")
     
     application.run_polling()
 
